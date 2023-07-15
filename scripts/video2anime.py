@@ -116,41 +116,43 @@ class Script(scripts.Script):
                 max_frames: int,
                 ):
         if enabled and not self.m2aScriptIsRuning:
-            self.m2aScriptIsRuning = True
-            noise_multiplier = 1
-            m2a_mode = 'img2img'
-            if isinstance(p, StableDiffusionProcessingTxt2Img):
-                m2a_mode = 'text2img'
-            print('movie2anime process:', enabled, init_mov, init_mov_dir, rembg_mode, fps_scale_child, fps_scale_parent,invoke_tagger,invoke_tagger_val,common_invoke_tagger, max_frames)
-            print('m2a mode:', m2a_mode)
-            if isinstance(p, StableDiffusionProcessingImg2Img):
-                print('movie2anime process resize_mode:', p.resize_mode)
+            try:
+                self.m2aScriptIsRuning = True
+                noise_multiplier = 1
+                m2a_mode = 'img2img'
+                if isinstance(p, StableDiffusionProcessingTxt2Img):
+                    m2a_mode = 'text2img'
+                print('movie2anime process:', enabled, init_mov, init_mov_dir, rembg_mode, fps_scale_child, fps_scale_parent,invoke_tagger,invoke_tagger_val,common_invoke_tagger, max_frames)
+                print('m2a mode:', m2a_mode)
+                if isinstance(p, StableDiffusionProcessingImg2Img):
+                    print('movie2anime process resize_mode:', p.resize_mode)
 
-            if not init_mov and not init_mov_dir:
-                raise Exception('Error！ Please add a video file!')
+                if not init_mov and not init_mov_dir:
+                    raise Exception('Error！ Please add a video file!')
 
-            if rembg_mode == 0:
-                rembg_mode = 'normal'
-            elif rembg_mode == 1:
-                rembg_mode = 'rembg'
-            else:
-                rembg_mode = 'maskbg'
+                if rembg_mode == 0:
+                    rembg_mode = 'normal'
+                elif rembg_mode == 1:
+                    rembg_mode = 'rembg'
+                else:
+                    rembg_mode = 'maskbg'
 
-            videos = []
+                videos = []
 
-            if not init_mov_dir:
-                video = process_m2a(p, init_mov, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode, invoke_tagger, invoke_tagger_val, common_invoke_tagger)
-                videos.append(video)
-            else:
-                m_files = os.listdir(init_mov_dir)
-                for m_file in m_files:
-                    video = process_m2a(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode, invoke_tagger, invoke_tagger_val, common_invoke_tagger)
+                if not init_mov_dir:
+                    video = process_m2a(p, init_mov, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode, invoke_tagger, invoke_tagger_val, common_invoke_tagger)
                     videos.append(video)
+                else:
+                    m_files = os.listdir(init_mov_dir)
+                    for file_name in m_files:
+                        m_file = os.path.join(init_mov_dir, file_name)
+                        video = process_m2a(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode, invoke_tagger, invoke_tagger_val, common_invoke_tagger)
+                        videos.append(video)
 
-            for video in videos:
-                print('video complete, output file is ', video)
-
-            self.m2aScriptIsRuning = False
+                for video in videos:
+                    print('video complete, output file is ', video)
+            finally:
+                self.m2aScriptIsRuning = False
 
 
 

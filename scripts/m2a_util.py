@@ -120,6 +120,7 @@ def images_to_video(images, frames, mode, w, h, out_path):
 # invoke_tagger_val 反推提示词阈值
 # common_invoke_tagger 公共提示词
 def process_m2a(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode, invoke_tagger, invoke_tagger_val, common_invoke_tagger):
+    print('mfile:', m_file)
     images, movie_frames = get_movie_all_images(m_file, fps_scale_child, fps_scale_parent)
     if not images:
         print('Failed to parse the video, please check')
@@ -165,13 +166,20 @@ def process_m2a(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mo
                 p.prompt = newTag
                 print('p.prompt 改为：', newTag)
             p.init_images = [img] * p.batch_size
+            if rembg_mode == 'rembg' or rembg_mode == 'maskbg':
+                p.mask_blur = 4
+                p.inpainting_fill = 1
+                p.inpaint_full_res = False
+                p.inpaint_full_res_padding = 32
+                p.inpainting_mask_invert = 0
+
         else:
             # 修改prompt
             if invoke_tagger:
                 newTag = getTagsFromImage(img, True, invoke_tagger_val, common_invoke_tagger)
                 p.prompt = newTag
                 print('p.prompt 改为：', newTag)
-            p.init_images = [img]
+            p.init_images = [image]
 
         print(f'current progress: {i + 1}/{max_frames}')
         processed = process_images(p)
