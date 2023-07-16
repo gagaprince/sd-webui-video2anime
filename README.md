@@ -12,17 +12,7 @@ Extension for [webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui).
 
 # 更多转绘及其他AIGC作品：
 
-抖音
-
-![image](img/3.jpg)
-
-小红书
-
-![image](img/5.png)
-
-B站
-
-![image](img/4.png)
+![image](img/7.jpg)
 
 
 # 技术交流 
