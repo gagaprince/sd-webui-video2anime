@@ -6,6 +6,13 @@ Extension for [webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui).
 
 ![image](img/1.png)
 
+# demo
+
+
+```HTML
+<video src="demo/1.mp4" controls="controls" width="500" height="300"></video>
+```
+
 # Installation
 
 Install from webui's Extensions tab.
