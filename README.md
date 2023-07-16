@@ -8,10 +8,8 @@ Extension for [webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui).
 
 # demo
 
+![image](img/2.gif)
 
-```HTML
-<video src="demo/1.mp4" controls="controls" width="500" height="300"></video>
-```
 
 # Installation
 
