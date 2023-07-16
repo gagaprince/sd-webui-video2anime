@@ -6,11 +6,11 @@ Extension for [webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui).
 
 ![image](img/1.png)
 
-# demo
+# 效果分享
 
 ![image](img/2.gif)
 
-# 更多转绘及其他AIGC作品：
+# 更多转绘及其他AIGC作品请关注：
 
 ![image](img/7.jpg)
 
