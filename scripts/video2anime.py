@@ -14,11 +14,14 @@ import subprocess as sp
 from scripts.m2a_config import m2a_outpath_samples, m2a_output_dir
 # from scripts.xyz import init_xyz
 
-from scripts.m2a_util import process_m2a
+from scripts.m2a_util import process_m2a, process_m2a_eb
 
 NAME = 'movie2anime'
 
 print(NAME)
+
+
+
 
 def open_folder(f):
     print('打开文件夹：', m2a_output_dir)
@@ -59,6 +62,9 @@ class Script(scripts.Script):
     def ui(self, is_img2img):
         with gr.Accordion(NAME, open=False):
             enabled = gr.Checkbox(label='Enabled', value=False)
+            with FormRow():
+                transform_mode = gr.Radio(label="转换方式", elem_id="transform_mode",
+                                       choices=["多帧渲染", "关键帧渲染"], type="index", value="0")
             with FormRow().style(equal_height=False):
                 with gr.Column(variant='compact', elem_id=f"m2a_settings"):
                     init_mov = gr.Video(label="Video for movie2anime", elem_id="m2a_video", show_label=False,
@@ -101,20 +107,98 @@ class Script(scripts.Script):
             invoke_tagger_val,
             common_invoke_tagger,
             max_frames,
+            transform_mode,
         ]
 
-    def before_process(self, p: StableDiffusionProcessing,
-                enabled: bool,
-                init_mov: str,
-                init_mov_dir: str,
-                rembg_mode: int,
-                fps_scale_child: int,
-                fps_scale_parent: int,
-                invoke_tagger: bool,
-                invoke_tagger_val: int,
-                common_invoke_tagger: str,
-                max_frames: int,
-                ):
+    def multiRender(
+            self,
+            p: StableDiffusionProcessing,
+            init_mov: str,
+            init_mov_dir: str,
+            rembg_mode: int,
+            fps_scale_child: int,
+            fps_scale_parent: int,
+            invoke_tagger: bool,
+            invoke_tagger_val: int,
+            common_invoke_tagger: str,
+            max_frames: int,
+            m2a_mode: str,
+    ):
+        print('多帧渲染')
+        if rembg_mode == 0:
+            rembg_mode = 'normal'
+        elif rembg_mode == 1:
+            rembg_mode = 'rembg'
+        else:
+            rembg_mode = 'maskbg'
+
+        videos = []
+
+        if not init_mov_dir:
+            video = process_m2a(p, init_mov, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode,
+                                invoke_tagger, invoke_tagger_val, common_invoke_tagger)
+            videos.append(video)
+        else:
+            m_files = os.listdir(init_mov_dir)
+            for file_name in m_files:
+                m_file = os.path.join(init_mov_dir, file_name)
+                video = process_m2a(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode,
+                                    invoke_tagger, invoke_tagger_val, common_invoke_tagger)
+                videos.append(video)
+
+        for video in videos:
+            print('video complete, output file is ', video)
+
+    def keyFrameRender(
+        self,
+        p: StableDiffusionProcessing,
+        init_mov: str,
+        init_mov_dir: str,
+        rembg_mode: int,
+        fps_scale_child: int,
+        fps_scale_parent: int,
+        invoke_tagger: bool,
+        invoke_tagger_val: int,
+        common_invoke_tagger: str,
+        max_frames: int,
+        m2a_mode: str,
+    ):
+        print('关键帧渲染')
+        videos = []
+
+        if not init_mov_dir:
+            video = process_m2a_eb(p, init_mov, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode,
+                                invoke_tagger, invoke_tagger_val, common_invoke_tagger)
+            videos.append(video)
+        else:
+            m_files = os.listdir(init_mov_dir)
+            for file_name in m_files:
+                m_file = os.path.join(init_mov_dir, file_name)
+                video = process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode,
+                                    invoke_tagger, invoke_tagger_val, common_invoke_tagger)
+                videos.append(video)
+
+        for video in videos:
+            print('video complete, output file is ', video)
+
+    def process(
+        self,
+        p: StableDiffusionProcessing,
+        enabled: bool,
+        init_mov: str,
+        init_mov_dir: str,
+        rembg_mode: int,
+        fps_scale_child: int,
+        fps_scale_parent: int,
+        invoke_tagger: bool,
+        invoke_tagger_val: int,
+        common_invoke_tagger: str,
+        max_frames: int,
+        transform_mode: int,
+    ):
+
+        print('process  here!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+
         if enabled and not self.m2aScriptIsRuning:
             try:
                 self.m2aScriptIsRuning = True
@@ -130,27 +214,35 @@ class Script(scripts.Script):
                 if not init_mov and not init_mov_dir:
                     raise Exception('Error！ Please add a video file!')
 
-                if rembg_mode == 0:
-                    rembg_mode = 'normal'
-                elif rembg_mode == 1:
-                    rembg_mode = 'rembg'
+                if transform_mode == 0:
+                    self.multiRender(
+                        p,
+                        init_mov,
+                        init_mov_dir,
+                        rembg_mode,
+                        fps_scale_child,
+                        fps_scale_parent,
+                        invoke_tagger,
+                        invoke_tagger_val,
+                        common_invoke_tagger,
+                        max_frames,
+                        m2a_mode,
+                    )
                 else:
-                    rembg_mode = 'maskbg'
+                    self.keyFrameRender(
+                        p,
+                        init_mov,
+                        init_mov_dir,
+                        rembg_mode,
+                        fps_scale_child,
+                        fps_scale_parent,
+                        invoke_tagger,
+                        invoke_tagger_val,
+                        common_invoke_tagger,
+                        max_frames,
+                        m2a_mode,
+                    )
 
-                videos = []
-
-                if not init_mov_dir:
-                    video = process_m2a(p, init_mov, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode, invoke_tagger, invoke_tagger_val, common_invoke_tagger)
-                    videos.append(video)
-                else:
-                    m_files = os.listdir(init_mov_dir)
-                    for file_name in m_files:
-                        m_file = os.path.join(init_mov_dir, file_name)
-                        video = process_m2a(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode, invoke_tagger, invoke_tagger_val, common_invoke_tagger)
-                        videos.append(video)
-
-                for video in videos:
-                    print('video complete, output file is ', video)
             finally:
                 self.m2aScriptIsRuning = False
 

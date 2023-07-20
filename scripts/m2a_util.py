@@ -209,4 +209,23 @@ def process_m2a(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mo
 
     return video
 
-    return ''
+def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode, invoke_tagger, invoke_tagger_val, common_invoke_tagger):
+    print('eb渲染')
+
+    #工作目录生成
+    # work-${time}
+    #   key video out
+
+    # 分拆视频帧到video
+    # 挑选关键帧
+
+    # 将关键帧进行sd转换 生成的图片保存至key目录
+
+    # 使用eb进行全video的转换
+    # 假设关键帧是1 6 11 16
+    # 用关键帧1做source video1做guide video2做target 得out2
+    # 切换out2做source video2做guide video3做target 得out3
+    # 出到out5的时候 因为out6是关键帧 所以使用key6作为out6
+    # 然后用out6 video6 video7 出out7 依次类推
+
+    # 将out组装成视频
