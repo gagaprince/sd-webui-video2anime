@@ -9,10 +9,12 @@ from PIL import Image, ImageOps
 import modules.images
 import os
 from modules.shared import opts, state
-from modules import shared, sd_samplers, processing
+from modules import shared, sd_samplers, processing, images
 from modules.processing import StableDiffusionProcessingImg2Img, StableDiffusionProcessingTxt2Img, process_images, Processed
 import rembg
-from scripts.m2a_config import m2a_outpath_samples, m2a_output_dir
+from scripts.m2a_config import m2a_outpath_samples, m2a_output_dir, m2a_eb_output_dir
+
+import time
 
 def refresh_interrogators():
     utils.refresh_interrogators()
@@ -108,6 +110,54 @@ def images_to_video(images, frames, mode, w, h, out_path):
         video.write(img)
     video.release()
     return out_path
+
+def mkWorkDir():
+    if not os.path.exists(m2a_eb_output_dir):
+        os.makedirs(m2a_eb_output_dir, exist_ok=True)
+    now = time.time()
+    now = int(now)
+    workDir = os.path.join(m2a_eb_output_dir, str(now))
+    keyDir = os.path.join(workDir,'key')
+    videoDir = os.path.join(workDir,'video')
+    outDir = os.path.join(workDir, 'out')
+    os.makedirs(workDir, exist_ok=True)
+    return [workDir,keyDir,videoDir,outDir]
+
+def video2imgs(videoPath, imgPath):
+    if not os.path.exists(imgPath):
+        os.makedirs(imgPath, exist_ok=True)             # 目标文件夹不存在，则创建
+    cap = cv2.VideoCapture(videoPath)    # 获取视频
+    judge = cap.isOpened()                 # 判断是否能打开成功
+    fps = cap.get(cv2.CAP_PROP_FPS)      # 帧率，视频每秒展示多少张图片
+    count = 0                            # 用于统计保存的图片数量
+    imgPaths = []
+
+    while(judge):
+        flag, frame = cap.read()         # 读取每一张图片 flag表示是否读取成功，frame是图片
+        if not flag:
+            print("Process finished!")
+            break
+        else:
+            imgname = str(count)+".png"
+            onePath = os.path.join(imgPath,imgname)
+            print(onePath)
+            cv2.imwrite(onePath, frame, [cv2.IMWRITE_PNG_COMPRESSION, 0])
+            imgPaths.append(onePath)
+            count += 1
+    cap.release()
+
+    return [imgPaths, fps]
+
+def selectKeyFrames(imgs, perNum):
+    index=0
+    selectImages = []
+    selectIndex = []
+    for img in imgs:
+        if index % perNum == 0:
+            selectImages.append(img)
+            selectIndex.append(index)
+            index += 1
+    return [selectImages, selectIndex]
 
 # p 图生图或者文生图实例
 # m_file 要转换的视频文件
@@ -215,11 +265,66 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
     #工作目录生成
     # work-${time}
     #   key video out
+    [workDir,keyDir,videoDir,outDir] = mkWorkDir()
+    print('workDir:', workDir)
 
     # 分拆视频帧到video
+    [videoImages, fps] = video2imgs(m_file, videoDir)
     # 挑选关键帧
+    [keyImages, keyIndexs] = selectKeyFrames(videoImages, fps_scale_parent)
 
     # 将关键帧进行sd转换 生成的图片保存至key目录
+    generate_keyFrames = []
+    for i, image in enumerate(keyImages):
+        state.job = f"{i + 1} out of {max_frames}"
+        if state.skipped:
+            state.skipped = False
+        if state.interrupted:
+            break
+        img = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), 'RGB')
+        img = ImageOps.exif_transpose(img)
+
+        if m2a_mode == 'img2img':
+            # p.mask = None
+            # if rembg_mode == 'rembg':
+            #     rembg_img = rembg_mov(img, False)
+            #     mask_img = rembg_mov(img, True)
+            #     img = rembg_img
+            #     p.image_mask = mask_img
+            # elif rembg_mode == 'maskbg':
+            #     mask_img = rembg_mov(img, True)
+            #     p.image_mask = mask_img
+            # 修改prompt
+            if invoke_tagger:
+                newTag = getTagsFromImage(img, True, invoke_tagger_val, common_invoke_tagger)
+                p.prompt = newTag
+                print('p.prompt 改为：', newTag)
+            p.init_images = [img] * p.batch_size
+            # if rembg_mode == 'rembg' or rembg_mode == 'maskbg':
+            #     p.mask_blur = 4
+            #     p.inpainting_fill = 1
+            #     p.inpaint_full_res = False
+            #     p.inpaint_full_res_padding = 32
+            #     p.inpainting_mask_invert = 0
+
+        else:
+            # 修改prompt
+            if invoke_tagger:
+                newTag = getTagsFromImage(img, True, invoke_tagger_val, common_invoke_tagger)
+                p.prompt = newTag
+                print('p.prompt 改为：', newTag)
+            p.init_images = [image]
+
+        print(f'current progress: {i + 1}/{max_frames}')
+        processed = process_images(p)
+        # 只取第一张
+        gen_image = processed.images[0]
+        print('这是第',i,'张关键帧图片:', gen_image)
+        keyFramePath = images.save_image(gen_image, keyDir, "", p.seed, p.prompt,
+                          forced_filename=str(keyIndexs[i]))
+        generate_keyFrames.append(keyFramePath)
+
+
 
     # 使用eb进行全video的转换
     # 假设关键帧是1 6 11 16
@@ -227,5 +332,7 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
     # 切换out2做source video2做guide video3做target 得out3
     # 出到out5的时候 因为out6是关键帧 所以使用key6作为out6
     # 然后用out6 video6 video7 出out7 依次类推
+
+
 
     # 将out组装成视频
