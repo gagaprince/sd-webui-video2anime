@@ -72,7 +72,7 @@ class Script(scripts.Script):
                 invoke_tagger = gr.Checkbox(label='是否启用反推提示词', value=False)
             with FormRow():
                 transform_mode = gr.Radio(label="转换方式", elem_id="transform_mode",
-                                       choices=["多帧渲染", "关键帧渲染"], type="index", value="0")
+                                       choices=["多帧渲染", "关键帧渲染"], type="value", value="多帧渲染")
             with FormRow():
                 invoke_tagger_val = gr.Number(label='反推提示词阈值', value=0.3,
                                             elem_id='m2a_invoke_tag_val')
@@ -194,10 +194,11 @@ class Script(scripts.Script):
         invoke_tagger_val: int,
         common_invoke_tagger: str,
         max_frames: int,
-        transform_mode: int,
+        transform_mode: str,
     ):
 
         print('process  here!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+        print('transform_mode', transform_mode)
 
         if enabled and not self.m2aScriptIsRuning:
             try:
@@ -214,7 +215,7 @@ class Script(scripts.Script):
                 if not init_mov and not init_mov_dir:
                     raise Exception('Error！ Please add a video file!')
 
-                if transform_mode == 0:
+                if transform_mode == '多帧渲染':
                     self.multiRender(
                         p,
                         init_mov,

@@ -10,6 +10,7 @@ import subprocess
 
 import modules.images
 import os
+import sys
 from modules.shared import opts, state
 from modules import shared, sd_samplers, processing, images
 from modules.processing import StableDiffusionProcessingImg2Img, StableDiffusionProcessingTxt2Img, process_images, Processed
@@ -113,6 +114,27 @@ def images_to_video(images, frames, mode, w, h, out_path):
     video.release()
     return out_path
 
+def imageFiles_to_video(imageFiles, fps, mode, w, h, out_path):
+    print('imageFiles:', imageFiles)
+    print('fps:', fps)
+    print('mode:', mode)
+    print('w,h:',w,h)
+    print('out_path:',out_path)
+    fourcc = cv2.VideoWriter_fourcc(*mode)
+    size = (w, h)
+    vid = cv2.VideoWriter(os.path.join(os.getcwd(),out_path), fourcc, fps, size)
+    for imageFile in imageFiles:
+        imageFile = os.path.join(os.getcwd(),imageFile)
+        print('imageFile:', imageFile)
+        img = cv2.imread(imageFile, 1)
+        print(img.shape)
+        vid.write(img)
+
+    vid.release()
+
+    return out_path
+
+
 def mkWorkDir():
     if not os.path.exists(m2a_eb_output_dir):
         os.makedirs(m2a_eb_output_dir, exist_ok=True)
@@ -123,6 +145,9 @@ def mkWorkDir():
     videoDir = os.path.join(workDir,'video')
     outDir = os.path.join(workDir, 'out')
     os.makedirs(workDir, exist_ok=True)
+    os.makedirs(keyDir, exist_ok=True)
+    os.makedirs(videoDir, exist_ok=True)
+    os.makedirs(outDir, exist_ok=True)
     return [workDir,keyDir,videoDir,outDir]
 
 def video2imgs(videoPath, imgPath, max_frames):
@@ -133,6 +158,7 @@ def video2imgs(videoPath, imgPath, max_frames):
     fps = cap.get(cv2.CAP_PROP_FPS)      # 帧率，视频每秒展示多少张图片
     count = 0                            # 用于统计保存的图片数量
     imgPaths = []
+    imgDataList = []
 
     while(judge):
         flag, frame = cap.read()         # 读取每一张图片 flag表示是否读取成功，frame是图片
@@ -143,6 +169,7 @@ def video2imgs(videoPath, imgPath, max_frames):
             imgname = str(count)+".png"
             onePath = os.path.join(imgPath,imgname)
             print(onePath)
+            imgDataList.append(frame)
             cv2.imwrite(onePath, frame, [cv2.IMWRITE_PNG_COMPRESSION, 0])
             imgPaths.append(onePath)
             count += 1
@@ -150,7 +177,7 @@ def video2imgs(videoPath, imgPath, max_frames):
             break
     cap.release()
 
-    return [imgPaths, fps]
+    return [imgPaths, imgDataList,fps]
 
 def selectKeyFrames(imgs, perNum):
     index=0
@@ -160,11 +187,13 @@ def selectKeyFrames(imgs, perNum):
         if index % perNum == 0:
             selectImages.append(img)
             selectIndex.append(index)
-            index += 1
+        index += 1
     return [selectImages, selectIndex]
 
 def runEb(ebsynth, keyframe, guide, frame, outPath):
     args = ['cmd','/c',ebsynth, "-style", keyframe, "-guide", guide, frame, "-output", outPath]
+
+    print('args:', args)
 
     # args = ['cmd','/c','ls']
 
@@ -177,7 +206,7 @@ def runEb(ebsynth, keyframe, guide, frame, outPath):
         print("Ebsynth returned a nonzero exit code:")
 
 def transWithEb(keyIndexs, keyFrames, videoFrames, outPath):
-    ebsynth=os.path.join(os.getcwd(),'bin','ebsynth.exe')
+    ebsynth=os.path.join(os.getcwd(),'extensions','sd-webui-video2anime','bin','ebsynth.exe')
     videoImageIdx = 0
     keyIdx = 0 #keyIndexs的下标
     keyIndex = keyIndexs[keyIdx] # 关键帧在video中的下标
@@ -187,24 +216,31 @@ def transWithEb(keyIndexs, keyFrames, videoFrames, outPath):
     target = ''
     outTmpFile = ''
     outFrames = []
-    for videoImg in videoFrames:
+    print('videoFrames:', videoFrames)
+    while videoImageIdx < len(videoFrames)-1:
+        print('videoImageIdx:', videoImageIdx)
         if videoImageIdx == keyIndex:
             sourceFile = keyFrames[keyIdx]
-            guide = videoImg
-            target = videoImg
+            guide = videoFrames[videoImageIdx]
+            target = videoFrames[videoImageIdx]
             keyIdx += 1
             if keyIdx >= len(keyIndexs): # 没有关键帧了给一个超大的值
                 keyIndex = 999999
             else:
-                keyIndex = keyIndexs[keyIdx]
+                keyIndex = keyIndexs[keyIdx] # keyIdx = 1  keyIndex =5
+
+            videoImageIdx -= 1
         elif videoImageIdx < keyIndex-1:
             sourceFile = outTmpFile
-            guide = videoImg
+            guide = videoFrames[videoImageIdx]
             target = videoFrames[videoImageIdx+1]
         elif videoImageIdx == keyIndex-1:
+            print('跳过此帧')
+            videoImageIdx += 1
             continue
-        outTmpFile = os.path.join(outPath,str(videoImageIdx)+'.png')
-        runEb(ebsynth, sourceFile, guide, target, outTmpFile)
+        outTmpFile = os.path.join(outPath,str(videoImageIdx+1)+'.png')
+        cwd = os.getcwd()
+        runEb(ebsynth, os.path.join(cwd,sourceFile), os.path.join(cwd,guide), os.path.join(cwd,target), os.path.join(cwd,outTmpFile))
         videoImageIdx += 1
         outFrames.append(outTmpFile)
 
@@ -314,6 +350,9 @@ def process_m2a(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mo
 def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode, invoke_tagger, invoke_tagger_val, common_invoke_tagger):
     print('eb渲染')
 
+    if invoke_tagger:
+        refresh_interrogators()
+
     #工作目录生成
     # work-${time}
     #   key video out
@@ -321,14 +360,17 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
     print('workDir:', workDir)
 
     # 分拆视频帧到video
-    [videoImages, fps] = video2imgs(m_file, videoDir, max_frames)
+    [videoImages, imgDataList, fps] = video2imgs(m_file, videoDir, max_frames)
     # 挑选关键帧
     [keyImages, keyIndexs] = selectKeyFrames(videoImages, fps_scale_parent)
 
+    print('keyIndexs', keyIndexs)
+
     # 将关键帧进行sd转换 生成的图片保存至key目录
     generate_keyFrames = []
-    for i, image in enumerate(keyImages):
-        state.job = f"{i + 1} out of {len(videoImages)}"
+    for i, keyIndex in enumerate(keyIndexs):
+        image = imgDataList[keyIndex]
+        state.job = f"{i + 1} out of {len(keyIndexs)}"
         if state.skipped:
             state.skipped = False
         if state.interrupted:
@@ -374,7 +416,8 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
         print('这是第',i,'张关键帧图片:', gen_image)
         keyFramePath = images.save_image(gen_image, keyDir, "", p.seed, p.prompt,
                           forced_filename=str(keyIndexs[i]))
-        generate_keyFrames.append(keyFramePath)
+        print('keyFramePath:', keyFramePath[0])
+        generate_keyFrames.append(keyFramePath[0])
 
     # 使用eb进行全video的转换
     # 假设关键帧是1 6 11 16
@@ -383,17 +426,17 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
     # 出到out5的时候 因为out6是关键帧 所以使用key6作为out6
     # 然后用out6 video6 video7 出out7 依次类推
 
-    outFrames = transWithEb(keyIndexs, generate_keyFrames, keyImages, outDir)
+    outFrames = transWithEb(keyIndexs, generate_keyFrames, videoImages, outDir)
 
     # 将out组装成视频
     r_f = '.mp4'
-    mode = 'mp4v'
+    mode = 'MP4V'
 
     w = p.width
     h = p.height
     print('width,height', w, h)
     print(f'Start generating {r_f} file')
-    video = images_to_video(outFrames, fps, mode, w, h,
+    video = imageFiles_to_video(outFrames, fps, mode, w, h,
                             os.path.join(m2a_output_dir, str(int(time.time())) + r_f, ))
 
     return video
