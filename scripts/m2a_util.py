@@ -6,6 +6,8 @@ import cv2
 import numpy
 from PIL import Image, ImageOps
 
+import subprocess
+
 import modules.images
 import os
 from modules.shared import opts, state
@@ -123,7 +125,7 @@ def mkWorkDir():
     os.makedirs(workDir, exist_ok=True)
     return [workDir,keyDir,videoDir,outDir]
 
-def video2imgs(videoPath, imgPath):
+def video2imgs(videoPath, imgPath, max_frames):
     if not os.path.exists(imgPath):
         os.makedirs(imgPath, exist_ok=True)             # 目标文件夹不存在，则创建
     cap = cv2.VideoCapture(videoPath)    # 获取视频
@@ -144,6 +146,8 @@ def video2imgs(videoPath, imgPath):
             cv2.imwrite(onePath, frame, [cv2.IMWRITE_PNG_COMPRESSION, 0])
             imgPaths.append(onePath)
             count += 1
+        if max_frames != -1 and count >= max_frames:
+            break
     cap.release()
 
     return [imgPaths, fps]
@@ -159,7 +163,21 @@ def selectKeyFrames(imgs, perNum):
             index += 1
     return [selectImages, selectIndex]
 
+def runEb(ebsynth, keyframe, guide, frame, outPath):
+    args = ['cmd','/c',ebsynth, "-style", keyframe, "-guide", guide, frame, "-output", outPath]
+
+    # args = ['cmd','/c','ls']
+
+    print(' '.join(args))
+
+    out = subprocess.run(args, stderr=subprocess.PIPE)
+
+    # If the command fails or verbose level > 1, print the command output
+    if out.returncode != 0:
+        print("Ebsynth returned a nonzero exit code:")
+
 def transWithEb(keyIndexs, keyFrames, videoFrames, outPath):
+    ebsynth=os.path.join(os.getcwd(),'bin','ebsynth.exe')
     videoImageIdx = 0
     keyIdx = 0 #keyIndexs的下标
     keyIndex = keyIndexs[keyIdx] # 关键帧在video中的下标
@@ -168,21 +186,29 @@ def transWithEb(keyIndexs, keyFrames, videoFrames, outPath):
     guide = ''
     target = ''
     outTmpFile = ''
+    outFrames = []
     for videoImg in videoFrames:
         if videoImageIdx == keyIndex:
             sourceFile = keyFrames[keyIdx]
             guide = videoImg
             target = videoImg
             keyIdx += 1
-            keyIndex = keyIndexs[keyIdx]
-        elif videoImageIdx < keyIndex:
+            if keyIdx >= len(keyIndexs): # 没有关键帧了给一个超大的值
+                keyIndex = 999999
+            else:
+                keyIndex = keyIndexs[keyIdx]
+        elif videoImageIdx < keyIndex-1:
             sourceFile = outTmpFile
             guide = videoImg
             target = videoFrames[videoImageIdx+1]
-
+        elif videoImageIdx == keyIndex-1:
+            continue
+        outTmpFile = os.path.join(outPath,str(videoImageIdx)+'.png')
+        runEb(ebsynth, sourceFile, guide, target, outTmpFile)
         videoImageIdx += 1
+        outFrames.append(outTmpFile)
 
-
+    return outFrames
 
 
 # p 图生图或者文生图实例
@@ -295,14 +321,14 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
     print('workDir:', workDir)
 
     # 分拆视频帧到video
-    [videoImages, fps] = video2imgs(m_file, videoDir)
+    [videoImages, fps] = video2imgs(m_file, videoDir, max_frames)
     # 挑选关键帧
     [keyImages, keyIndexs] = selectKeyFrames(videoImages, fps_scale_parent)
 
     # 将关键帧进行sd转换 生成的图片保存至key目录
     generate_keyFrames = []
     for i, image in enumerate(keyImages):
-        state.job = f"{i + 1} out of {max_frames}"
+        state.job = f"{i + 1} out of {len(videoImages)}"
         if state.skipped:
             state.skipped = False
         if state.interrupted:
@@ -357,8 +383,17 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
     # 出到out5的时候 因为out6是关键帧 所以使用key6作为out6
     # 然后用out6 video6 video7 出out7 依次类推
 
-    transWithEb()
-
-
+    outFrames = transWithEb(keyIndexs, generate_keyFrames, keyImages, outDir)
 
     # 将out组装成视频
+    r_f = '.mp4'
+    mode = 'mp4v'
+
+    w = p.width
+    h = p.height
+    print('width,height', w, h)
+    print(f'Start generating {r_f} file')
+    video = images_to_video(outFrames, fps, mode, w, h,
+                            os.path.join(m2a_output_dir, str(int(time.time())) + r_f, ))
+
+    return video
