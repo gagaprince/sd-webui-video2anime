@@ -62,9 +62,6 @@ class Script(scripts.Script):
     def ui(self, is_img2img):
         with gr.Accordion(NAME, open=False):
             enabled = gr.Checkbox(label='Enabled', value=False)
-            with FormRow():
-                transform_mode = gr.Radio(label="转换方式", elem_id="transform_mode",
-                                       choices=["多帧渲染", "关键帧渲染"], type="index", value="0")
             with FormRow().style(equal_height=False):
                 with gr.Column(variant='compact', elem_id=f"m2a_settings"):
                     init_mov = gr.Video(label="Video for movie2anime", elem_id="m2a_video", show_label=False,
@@ -73,6 +70,9 @@ class Script(scripts.Script):
                                               placeholder="请输入批量视频目录, 上传视频与当前选项二选一")
             with FormRow():
                 invoke_tagger = gr.Checkbox(label='是否启用反推提示词', value=False)
+            with FormRow():
+                transform_mode = gr.Radio(label="转换方式", elem_id="transform_mode",
+                                       choices=["多帧渲染", "关键帧渲染"], type="index", value="0")
             with FormRow():
                 invoke_tagger_val = gr.Number(label='反推提示词阈值', value=0.3,
                                             elem_id='m2a_invoke_tag_val')
