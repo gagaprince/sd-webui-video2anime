@@ -159,6 +159,32 @@ def selectKeyFrames(imgs, perNum):
             index += 1
     return [selectImages, selectIndex]
 
+def transWithEb(keyIndexs, keyFrames, videoFrames, outPath):
+    videoImageIdx = 0
+    keyIdx = 0 #keyIndexs的下标
+    keyIndex = keyIndexs[keyIdx] # 关键帧在video中的下标
+
+    sourceFile = ''
+    guide = ''
+    target = ''
+    outTmpFile = ''
+    for videoImg in videoFrames:
+        if videoImageIdx == keyIndex:
+            sourceFile = keyFrames[keyIdx]
+            guide = videoImg
+            target = videoImg
+            keyIdx += 1
+            keyIndex = keyIndexs[keyIdx]
+        elif videoImageIdx < keyIndex:
+            sourceFile = outTmpFile
+            guide = videoImg
+            target = videoFrames[videoImageIdx+1]
+
+        videoImageIdx += 1
+
+
+
+
 # p 图生图或者文生图实例
 # m_file 要转换的视频文件
 # fps_scale_child 跳帧参数
@@ -324,14 +350,14 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
                           forced_filename=str(keyIndexs[i]))
         generate_keyFrames.append(keyFramePath)
 
-
-
     # 使用eb进行全video的转换
     # 假设关键帧是1 6 11 16
     # 用关键帧1做source video1做guide video2做target 得out2
     # 切换out2做source video2做guide video3做target 得out3
     # 出到out5的时候 因为out6是关键帧 所以使用key6作为out6
     # 然后用out6 video6 video7 出out7 依次类推
+
+    transWithEb()
 
 
 
