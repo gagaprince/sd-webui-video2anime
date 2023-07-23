@@ -20,6 +20,7 @@ from scripts.m2a_config import m2a_outpath_samples, m2a_output_dir, m2a_eb_outpu
 import time
 import math
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
 
 _kernel = None
 
@@ -70,6 +71,14 @@ def rembg_mov(image, return_mask=False):
         alpha_matting_erode_size=alpha_matting_erode_size,
     )
 
+def rembg_mov_cv2(cvImg, return_mask=False):
+    img = Image.fromarray(cv2.cvtColor(cvImg, cv2.COLOR_BGR2RGB), 'RGB')
+    img = ImageOps.exif_transpose(img)
+    img = rembg_mov(img, return_mask)
+    img = np.asarray(img)
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    return img
+
 def get_movie_all_images(file, fps_child, fps_parent):
     if file is None:
         return None
@@ -113,7 +122,7 @@ def images_to_video(images, frames, mode, w, h, out_path):
     fourcc = cv2.VideoWriter_fourcc(*mode)
     video = cv2.VideoWriter(out_path, fourcc, frames, (w, h))
     for image in images:
-        img = cv2.cvtColor(numpy.asarray(image), cv2.COLOR_RGB2BGR)
+        img = cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
         video.write(img)
     video.release()
     return out_path
@@ -131,7 +140,6 @@ def imageFiles_to_video(imageFiles, fps, mode, w, h, out_path):
         imageFile = os.path.join(os.getcwd(),imageFile)
         print('imageFile:', imageFile)
         img = cv2.imread(imageFile, 1)
-        print(img.shape)
         vid.write(img)
 
     vid.release()
@@ -149,12 +157,14 @@ def mkWorkDir():
     videoDir = os.path.join(workDir,'video')
     outTmpDir = os.path.join(workDir,'tmpout')
     outDir = os.path.join(workDir, 'out')
+    maskDir = os.path.join(workDir,'mask')
     os.makedirs(workDir, exist_ok=True)
     os.makedirs(keyDir, exist_ok=True)
     os.makedirs(videoDir, exist_ok=True)
     os.makedirs(outTmpDir, exist_ok=True)
     os.makedirs(outDir, exist_ok=True)
-    return [workDir,keyDir,videoDir,outDir, outTmpDir]
+    os.makedirs(maskDir, exist_ok=True)
+    return workDir,keyDir,videoDir,outDir, outTmpDir,maskDir
 
 def corpImg(originImg, w, h):
     oldh = originImg.shape[0]
@@ -180,13 +190,12 @@ def corpImg(originImg, w, h):
         endX = oldw
         corpImg = originImg[beginX:endX, beginY:endY]
     else:
-        print('保持原样')
         corpImg = originImg
 
     corpImg = cv2.resize(corpImg, (w, h))
     return corpImg
 
-def video2imgs(videoPath, imgPath, max_frames, needCorp, w=720,h=1280):
+def video2imgs(videoPath, imgPath, max_frames, needCorp, w=720,h=1280, maskDir=''):
     if not os.path.exists(imgPath):
         os.makedirs(imgPath, exist_ok=True)             # 目标文件夹不存在，则创建
     cap = cv2.VideoCapture(videoPath)    # 获取视频
@@ -204,10 +213,15 @@ def video2imgs(videoPath, imgPath, max_frames, needCorp, w=720,h=1280):
         else:
             imgname = str(count)+".png"
             onePath = os.path.join(imgPath,imgname)
+
             print(onePath)
 
             if needCorp:
                 frame = corpImg(frame,w,h)
+            if maskDir != '':
+                mask = rembg_mov_cv2(frame, True)
+                maskPath = os.path.join(maskDir,imgname)
+                cv2.imwrite(maskPath, mask, [cv2.IMWRITE_PNG_COMPRESSION, 0])
 
             imgDataList.append(frame)
             cv2.imwrite(onePath, frame, [cv2.IMWRITE_PNG_COMPRESSION, 0])
@@ -374,10 +388,23 @@ def runEb(ebsynth, keyframe, guide, frame, outPath):
 #
 #     return outFrames
 
+def ebTask(options):
+    [videoFrames, outPath, keyIndex, ebsynth, cwd, sourceFile, guide, beginKeyIndex, endKeyIndex] = options
+    for i in range(beginKeyIndex, endKeyIndex):
+        if state.interrupted:
+            break
+        target = videoFrames[i]
+        outTmpFile = os.path.join(outPath, str(keyIndex) + '_' + str(i) + '.png')
+        runEb(ebsynth, os.path.join(cwd, sourceFile), os.path.join(cwd, guide), os.path.join(cwd, target),
+              os.path.join(cwd, outTmpFile))
+
+    return f'{beginKeyIndex}-{endKeyIndex}:完成'
+
 #改为关键帧引导
 def transWithEb(keyIndexs, keyFrames, videoFrames, outPath):
     ebsynth=os.path.join(os.getcwd(),'extensions','sd-webui-video2anime','bin','ebsynth.exe')
     cwd = os.getcwd()
+    taskOptions = []
     for idx, keyIndex in enumerate(keyIndexs):
         if state.interrupted:
             break
@@ -397,17 +424,34 @@ def transWithEb(keyIndexs, keyFrames, videoFrames, outPath):
         else:
             endKeyIndex = keyIndexs[idx+1]
 
-        for i in range(beginKeyIndex, endKeyIndex):
-            if state.interrupted:
-                break
-            target = videoFrames[i]
-            outTmpFile = os.path.join(outPath,str(keyIndex)+'_'+str(i)+'.png')
-            runEb(ebsynth, os.path.join(cwd, sourceFile), os.path.join(cwd, guide), os.path.join(cwd, target),
-                  os.path.join(cwd, outTmpFile))
+        taskOpt = [videoFrames, outPath, keyIndex, ebsynth, cwd, sourceFile, guide, beginKeyIndex, endKeyIndex]
+        taskOptions.append(taskOpt)
+
+
+        # for i in range(beginKeyIndex, endKeyIndex):
+        #     if state.interrupted:
+        #         break
+        #     target = videoFrames[i]
+        #     outTmpFile = os.path.join(outPath,str(keyIndex)+'_'+str(i)+'.png')
+        #     runEb(ebsynth, os.path.join(cwd, sourceFile), os.path.join(cwd, guide), os.path.join(cwd, target),
+        #           os.path.join(cwd, outTmpFile))
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = pool.map(ebTask, tuple(taskOptions))
+        print('results:', results)
+
+
+def giveMeMaskImg(originImg, transImg, maskImg):
+    originsingleimg = cv2.bitwise_and(originImg, originImg, mask=maskImg)
+    transImg = cv2.bitwise_and(transImg, transImg, mask=maskImg)
+    img = cv2.subtract(originImg, originsingleimg)
+    img = cv2.add(img, transImg)
+    return img
 
 # 将输出的eb帧合并成视频需要的帧
-def ebFilesToOutFrames(videoFrames, keyIndexs, outImgPath, outPath):
+def ebFilesToOutFrames(videoFrames, keyIndexs, outImgPath, outPath, maskDir):
     outFrames = []
+    originBgFrames = []
+    greenBgFrames = []
     cwd = os.getcwd()
     for idx, keyIndex in enumerate(keyIndexs):
         beginKeyIndex = keyIndex
@@ -425,11 +469,10 @@ def ebFilesToOutFrames(videoFrames, keyIndexs, outImgPath, outPath):
         for i in range(beginKeyIndex, endKeyIndex):
             if state.interrupted:
                 break
-            outFrame = os.path.join(cwd, outPath, str(i)+'.png')
+
             if singleRender:
                 currentImg = os.path.join(outImgPath, str(beginKeyIndex) + '_' + str(i) + '.png')
                 img = cv2.imread(currentImg, 1)
-                cv2.imwrite(outFrame, img)
             else:
                 currentImg = os.path.join(outImgPath, str(beginKeyIndex) + '_' + str(i) + '.png')
                 nextImg = os.path.join(outImgPath, str(endKeyIndex)+ '_' + str(i) + '.png')
@@ -438,11 +481,32 @@ def ebFilesToOutFrames(videoFrames, keyIndexs, outImgPath, outPath):
                 back_rate = (i - beginKeyIndex) / max(1, (
                             endKeyIndex - beginKeyIndex))
                 img = cv2.addWeighted(img_f, 1.0 - back_rate, img_b, back_rate, 0)
-                cv2.imwrite(outFrame, img)
 
+            # 增加原背景输出
+            originBgFrame = os.path.join(cwd, outPath, 'origin_' + str(i) + '.png')
+            originImg = cv2.imread(videoFrames[i],1)
+            maskPath = os.path.join(cwd,maskDir,str(i)+'.png')
+            maskImg = cv2.imread(maskPath,cv2.IMREAD_GRAYSCALE)
+            originImg = giveMeMaskImg(originImg,img,maskImg)
+
+            # 增加绿色背景输出
+            h = img.shape[0]
+            w = img.shape[1]
+            img_green = np.zeros([h,w,3], np.uint8)
+            img_green[:,:,1] = np.zeros([h,w])+255
+            greenBgFrame = os.path.join(cwd, outPath, 'green_' + str(i) + '.png')
+            greenImg = giveMeMaskImg(img_green,img,maskImg)
+
+
+            outFrame = os.path.join(cwd, outPath, str(i) + '.png')
+            cv2.imwrite(outFrame, img)
+            cv2.imwrite(originBgFrame, originImg)
+            cv2.imwrite(greenBgFrame, greenImg)
             outFrames.append(outFrame)
+            originBgFrames.append(originBgFrame)
+            greenBgFrames.append(greenBgFrame)
 
-    return outFrames
+    return outFrames, originBgFrames, greenBgFrames
 
 
 
@@ -558,11 +622,11 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
     #工作目录生成
     # work-${time}
     #   key video out
-    [workDir,keyDir,videoDir,outDir, outTmpDir] = mkWorkDir()
+    workDir,keyDir,videoDir,outDir, outTmpDir, maskDir = mkWorkDir()
     print('workDir:', workDir)
 
     # 分拆视频帧到video
-    [videoImages, imgDataList, fps] = video2imgs(m_file, videoDir, max_frames, True, p.width, p.height)
+    [videoImages, imgDataList, fps] = video2imgs(m_file, videoDir, max_frames, True, p.width, p.height, maskDir)
     # 挑选关键帧
     [keyImages, keyIndexs] = selectVideoKeyFrame(videoImages,min_gap, max_gap,max_delta, True)
 
@@ -634,7 +698,7 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
 
     transWithEb(keyIndexs, generate_keyFrames, videoImages, outTmpDir)
 
-    outFrames = ebFilesToOutFrames(videoImages, keyIndexs, outTmpDir, outDir)
+    outFrames, originBgFrames, greenBgFrames = ebFilesToOutFrames(videoImages, keyIndexs, outTmpDir, outDir, maskDir)
 
     # 将out组装成视频
     r_f = '.mp4'
@@ -648,6 +712,11 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
         return
     video = imageFiles_to_video(outFrames, fps, mode, w, h,
                             os.path.join(m2a_output_dir, str(int(time.time())) + r_f, ))
+
+    imageFiles_to_video(originBgFrames, fps, mode, w, h,
+                        os.path.join(m2a_output_dir, 'origin_'+str(int(time.time())) + r_f, ))
+    imageFiles_to_video(greenBgFrames, fps, mode, w, h,
+                        os.path.join(m2a_output_dir, 'green_'+str(int(time.time())) + r_f, ))
 
 
     return video

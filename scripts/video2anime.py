@@ -178,6 +178,12 @@ class Script(scripts.Script):
         max_delta: int,
     ):
         videos = []
+        if rembg_mode == 0:
+            rembg_mode = 'normal'
+        elif rembg_mode == 1:
+            rembg_mode = 'rembg'
+        else:
+            rembg_mode = 'maskbg'
 
         if not init_mov_dir:
             video = process_m2a_eb(p, init_mov, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode,
