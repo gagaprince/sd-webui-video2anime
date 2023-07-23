@@ -10,6 +10,7 @@ import shutil
 import sys
 import platform
 import subprocess as sp
+from modules.shared import opts, state
 
 from scripts.m2a_config import m2a_outpath_samples, m2a_output_dir
 # from scripts.xyz import init_xyz
@@ -69,10 +70,17 @@ class Script(scripts.Script):
                     init_mov_dir = gr.Textbox(label="批量转换视频目录", elem_id="m2a_video_dir", show_label=True, lines=1,
                                               placeholder="请输入批量视频目录, 上传视频与当前选项二选一")
             with FormRow():
-                invoke_tagger = gr.Checkbox(label='是否启用反推提示词', value=False)
-            with FormRow():
                 transform_mode = gr.Radio(label="转换方式", elem_id="transform_mode",
                                        choices=["多帧渲染", "关键帧渲染"], type="value", value="多帧渲染")
+            with FormRow():
+                min_gap = gr.Number(label='最小关键帧间隔', value=10,
+                                            elem_id='min_gap')
+                max_gap = gr.Number(label='最大关键帧间隔', value=300,
+                                    elem_id='max_gap')
+                max_delta = gr.Number(label='选取关键帧阈值', value=35,
+                                    elem_id='max_delta')
+            with FormRow():
+                invoke_tagger = gr.Checkbox(label='是否启用反推提示词', value=False)
             with FormRow():
                 invoke_tagger_val = gr.Number(label='反推提示词阈值', value=0.3,
                                             elem_id='m2a_invoke_tag_val')
@@ -108,6 +116,9 @@ class Script(scripts.Script):
             common_invoke_tagger,
             max_frames,
             transform_mode,
+            min_gap,
+            max_gap,
+            max_delta,
         ]
 
     def multiRender(
@@ -162,20 +173,22 @@ class Script(scripts.Script):
         common_invoke_tagger: str,
         max_frames: int,
         m2a_mode: str,
+        min_gap: int,
+        max_gap: int,
+        max_delta: int,
     ):
-        print('关键帧渲染')
         videos = []
 
         if not init_mov_dir:
             video = process_m2a_eb(p, init_mov, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode,
-                                invoke_tagger, invoke_tagger_val, common_invoke_tagger)
+                                invoke_tagger, invoke_tagger_val, common_invoke_tagger,min_gap,max_gap,max_delta)
             videos.append(video)
         else:
             m_files = os.listdir(init_mov_dir)
             for file_name in m_files:
                 m_file = os.path.join(init_mov_dir, file_name)
                 video = process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode,
-                                    invoke_tagger, invoke_tagger_val, common_invoke_tagger)
+                                    invoke_tagger, invoke_tagger_val, common_invoke_tagger,min_gap,max_gap,max_delta)
                 videos.append(video)
 
         for video in videos:
@@ -195,10 +208,10 @@ class Script(scripts.Script):
         common_invoke_tagger: str,
         max_frames: int,
         transform_mode: str,
+        min_gap: int,
+        max_gap: int,
+        max_delta: int,
     ):
-
-        print('process  here!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
-        print('transform_mode', transform_mode)
 
         if enabled and not self.m2aScriptIsRuning:
             try:
@@ -242,10 +255,14 @@ class Script(scripts.Script):
                         common_invoke_tagger,
                         max_frames,
                         m2a_mode,
+                        min_gap,
+                        max_gap,
+                        max_delta,
                     )
 
             finally:
                 self.m2aScriptIsRuning = False
+                state.interrupted = True
 
 
 

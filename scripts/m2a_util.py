@@ -18,6 +18,10 @@ import rembg
 from scripts.m2a_config import m2a_outpath_samples, m2a_output_dir, m2a_eb_output_dir
 
 import time
+import math
+import numpy as np
+
+_kernel = None
 
 def refresh_interrogators():
     utils.refresh_interrogators()
@@ -143,14 +147,46 @@ def mkWorkDir():
     workDir = os.path.join(m2a_eb_output_dir, str(now))
     keyDir = os.path.join(workDir,'key')
     videoDir = os.path.join(workDir,'video')
+    outTmpDir = os.path.join(workDir,'tmpout')
     outDir = os.path.join(workDir, 'out')
     os.makedirs(workDir, exist_ok=True)
     os.makedirs(keyDir, exist_ok=True)
     os.makedirs(videoDir, exist_ok=True)
+    os.makedirs(outTmpDir, exist_ok=True)
     os.makedirs(outDir, exist_ok=True)
-    return [workDir,keyDir,videoDir,outDir]
+    return [workDir,keyDir,videoDir,outDir, outTmpDir]
 
-def video2imgs(videoPath, imgPath, max_frames):
+def corpImg(originImg, w, h):
+    oldh = originImg.shape[0]
+    oldw = originImg.shape[1]
+    print(oldw, oldh)
+
+    corpImg = []
+    if int(oldw * h / oldh) > w:
+        print('需要截取w')
+        needw = w * oldh / h
+        beginX = int((oldw - needw) / 2)
+        endX = int(beginX + needw)
+        beginY = 0
+        endY = oldh
+        corpImg = originImg[beginX:endX, beginY:endY]
+
+    elif int(oldw * h / oldh) < w:
+        print('需要截取h')
+        needY = h * oldw / w
+        beginY = int((oldh - needY) / 2)
+        endY = int(beginY + needY)
+        beginX = 0
+        endX = oldw
+        corpImg = originImg[beginX:endX, beginY:endY]
+    else:
+        print('保持原样')
+        corpImg = originImg
+
+    corpImg = cv2.resize(corpImg, (w, h))
+    return corpImg
+
+def video2imgs(videoPath, imgPath, max_frames, needCorp, w=720,h=1280):
     if not os.path.exists(imgPath):
         os.makedirs(imgPath, exist_ok=True)             # 目标文件夹不存在，则创建
     cap = cv2.VideoCapture(videoPath)    # 获取视频
@@ -169,6 +205,10 @@ def video2imgs(videoPath, imgPath, max_frames):
             imgname = str(count)+".png"
             onePath = os.path.join(imgPath,imgname)
             print(onePath)
+
+            if needCorp:
+                frame = corpImg(frame,w,h)
+
             imgDataList.append(frame)
             cv2.imwrite(onePath, frame, [cv2.IMWRITE_PNG_COMPRESSION, 0])
             imgPaths.append(onePath)
@@ -178,6 +218,94 @@ def video2imgs(videoPath, imgPath, max_frames):
     cap.release()
 
     return [imgPaths, imgDataList,fps]
+
+
+def mean_pixel_distance(left: np.ndarray, right: np.ndarray) -> float:
+    """Return the mean average distance in pixel values between `left` and `right`.
+    Both `left and `right` should be 2 dimensional 8-bit images of the same shape.
+    """
+    assert len(left.shape) == 2 and len(right.shape) == 2
+    assert left.shape == right.shape
+    num_pixels: float = float(left.shape[0] * left.shape[1])
+    return (np.sum(np.abs(left.astype(np.int32) - right.astype(np.int32))) / num_pixels)
+
+def estimated_kernel_size(frame_width: int, frame_height: int) -> int:
+    """Estimate kernel size based on video resolution."""
+    size: int = 4 + round(math.sqrt(frame_width * frame_height) / 192)
+    if size % 2 == 0:
+        size += 1
+    return size
+def _detect_edges(lum: np.ndarray) -> np.ndarray:
+    global _kernel
+    """Detect edges using the luma channel of a frame.
+    Arguments:
+        lum: 2D 8-bit image representing the luma channel of a frame.
+    Returns:
+        2D 8-bit image of the same size as the input, where pixels with values of 255
+        represent edges, and all other pixels are 0.
+    """
+    # Initialize kernel.
+    if _kernel is None:
+        kernel_size = estimated_kernel_size(lum.shape[1], lum.shape[0])
+        _kernel = np.ones((kernel_size, kernel_size), np.uint8)
+
+    # Estimate levels for thresholding.
+    sigma: float = 1.0 / 3.0
+    median = np.median(lum)
+    low = int(max(0, (1.0 - sigma) * median))
+    high = int(min(255, (1.0 + sigma) * median))
+
+    # Calculate edges using Canny algorithm, and reduce noise by dilating the edges.
+    # This increases edge overlap leading to improved robustness against noise and slow
+    # camera movement. Note that very large kernel sizes can negatively affect accuracy.
+    edges = cv2.Canny(lum, low, high)
+    return cv2.dilate(edges, _kernel)
+def detect_edges(img_path):
+    print('img_path:', img_path)
+    im = cv2.imread(img_path)
+
+    hue, sat, lum = cv2.split(cv2.cvtColor( im , cv2.COLOR_BGR2HSV))
+    return _detect_edges(lum)
+
+def selectVideoKeyFrame(videoFrames, min_gap, max_gap, th, add_last_frame):
+    keys = []
+    key_frames = []
+
+    keys.append(0)
+    key_frame = videoFrames[0]
+    key_frames.append(key_frame)
+    gap = 0
+    key_edges = detect_edges(key_frame)
+    idx = 1
+    while idx < len(videoFrames):
+        gap += 1
+        if gap < min_gap:
+            idx += 1
+            continue
+        videoFrame = videoFrames[idx]
+        edges = detect_edges(videoFrame)
+
+        delta = mean_pixel_distance(edges, key_edges)
+        print('delta:', delta)
+
+        _th = th * (max_gap - gap) / max_gap
+
+        if _th < delta:
+            keys.append(idx)
+            key_frame = videoFrame
+            key_frames.append(key_frame)
+            key_edges = edges
+            gap = 0
+
+        idx+=1
+
+    if add_last_frame:
+        last_frame = len(videoFrames)-1
+        if not last_frame in keys:
+            keys.append(last_frame)
+            key_frames.append(videoFrames[last_frame])
+
+    return key_frames, keys
 
 def selectKeyFrames(imgs, perNum):
     index=0
@@ -191,7 +319,7 @@ def selectKeyFrames(imgs, perNum):
     return [selectImages, selectIndex]
 
 def runEb(ebsynth, keyframe, guide, frame, outPath):
-    args = ['cmd','/c',ebsynth, "-style", keyframe, "-guide", guide, frame, "-output", outPath]
+    args = ['cmd','/c',ebsynth, "-style", keyframe, "-guide", guide, frame, "-weight", "4.0", "-output", outPath]
 
     print('args:', args)
 
@@ -205,46 +333,120 @@ def runEb(ebsynth, keyframe, guide, frame, outPath):
     if out.returncode != 0:
         print("Ebsynth returned a nonzero exit code:")
 
+# def transWithEb(keyIndexs, keyFrames, videoFrames, outPath):
+#     ebsynth=os.path.join(os.getcwd(),'extensions','sd-webui-video2anime','bin','ebsynth.exe')
+#     videoImageIdx = 0
+#     keyIdx = 0 #keyIndexs的下标
+#     keyIndex = keyIndexs[keyIdx] # 关键帧在video中的下标
+#
+#     sourceFile = ''
+#     guide = ''
+#     target = ''
+#     outTmpFile = ''
+#     outFrames = []
+#     print('videoFrames:', videoFrames)
+#     while videoImageIdx < len(videoFrames)-1:
+#         print('videoImageIdx:', videoImageIdx)
+#         if videoImageIdx == keyIndex:
+#             sourceFile = keyFrames[keyIdx]
+#             guide = videoFrames[videoImageIdx]
+#             target = videoFrames[videoImageIdx]
+#             keyIdx += 1
+#             if keyIdx >= len(keyIndexs): # 没有关键帧了给一个超大的值
+#                 keyIndex = 999999
+#             else:
+#                 keyIndex = keyIndexs[keyIdx] # keyIdx = 1  keyIndex =5
+#
+#             videoImageIdx -= 1
+#         elif videoImageIdx < keyIndex-1:
+#             sourceFile = outTmpFile
+#             guide = videoFrames[videoImageIdx]
+#             target = videoFrames[videoImageIdx+1]
+#         elif videoImageIdx == keyIndex-1:
+#             print('跳过此帧')
+#             videoImageIdx += 1
+#             continue
+#         outTmpFile = os.path.join(outPath,str(videoImageIdx+1)+'.png')
+#         cwd = os.getcwd()
+#         runEb(ebsynth, os.path.join(cwd,sourceFile), os.path.join(cwd,guide), os.path.join(cwd,target), os.path.join(cwd,outTmpFile))
+#         videoImageIdx += 1
+#         outFrames.append(outTmpFile)
+#
+#     return outFrames
+
+#改为关键帧引导
 def transWithEb(keyIndexs, keyFrames, videoFrames, outPath):
     ebsynth=os.path.join(os.getcwd(),'extensions','sd-webui-video2anime','bin','ebsynth.exe')
-    videoImageIdx = 0
-    keyIdx = 0 #keyIndexs的下标
-    keyIndex = keyIndexs[keyIdx] # 关键帧在video中的下标
+    cwd = os.getcwd()
+    for idx, keyIndex in enumerate(keyIndexs):
+        if state.interrupted:
+            break
+        sourceFile = keyFrames[idx]
+        guide = videoFrames[keyIndex]
 
-    sourceFile = ''
-    guide = ''
-    target = ''
-    outTmpFile = ''
+        beginKeyIndex = 0
+        endKeyIndex = len(videoFrames)
+
+        #最左侧
+        if idx-1 < 0:
+            beginKeyIndex = 0
+        else:
+            beginKeyIndex = keyIndexs[idx-1]
+        if idx+1 >= len(keyIndexs):
+            endKeyIndex = len(videoFrames)
+        else:
+            endKeyIndex = keyIndexs[idx+1]
+
+        for i in range(beginKeyIndex, endKeyIndex):
+            if state.interrupted:
+                break
+            target = videoFrames[i]
+            outTmpFile = os.path.join(outPath,str(keyIndex)+'_'+str(i)+'.png')
+            runEb(ebsynth, os.path.join(cwd, sourceFile), os.path.join(cwd, guide), os.path.join(cwd, target),
+                  os.path.join(cwd, outTmpFile))
+
+# 将输出的eb帧合并成视频需要的帧
+def ebFilesToOutFrames(videoFrames, keyIndexs, outImgPath, outPath):
     outFrames = []
-    print('videoFrames:', videoFrames)
-    while videoImageIdx < len(videoFrames)-1:
-        print('videoImageIdx:', videoImageIdx)
-        if videoImageIdx == keyIndex:
-            sourceFile = keyFrames[keyIdx]
-            guide = videoFrames[videoImageIdx]
-            target = videoFrames[videoImageIdx]
-            keyIdx += 1
-            if keyIdx >= len(keyIndexs): # 没有关键帧了给一个超大的值
-                keyIndex = 999999
-            else:
-                keyIndex = keyIndexs[keyIdx] # keyIdx = 1  keyIndex =5
+    cwd = os.getcwd()
+    for idx, keyIndex in enumerate(keyIndexs):
+        beginKeyIndex = keyIndex
+        endKeyIndex = len(videoFrames)
+        singleRender = False
 
-            videoImageIdx -= 1
-        elif videoImageIdx < keyIndex-1:
-            sourceFile = outTmpFile
-            guide = videoFrames[videoImageIdx]
-            target = videoFrames[videoImageIdx+1]
-        elif videoImageIdx == keyIndex-1:
-            print('跳过此帧')
-            videoImageIdx += 1
-            continue
-        outTmpFile = os.path.join(outPath,str(videoImageIdx+1)+'.png')
-        cwd = os.getcwd()
-        runEb(ebsynth, os.path.join(cwd,sourceFile), os.path.join(cwd,guide), os.path.join(cwd,target), os.path.join(cwd,outTmpFile))
-        videoImageIdx += 1
-        outFrames.append(outTmpFile)
+        if idx + 1 >= len(keyIndexs):
+            # 需要单独渲染当前关键帧的图片
+            endKeyIndex = len(videoFrames)
+            print('单独渲染当前关键帧产生的图片')
+            singleRender = True
+        else:
+            endKeyIndex = keyIndexs[idx + 1]
+
+        for i in range(beginKeyIndex, endKeyIndex):
+            if state.interrupted:
+                break
+            outFrame = os.path.join(cwd, outPath, str(i)+'.png')
+            if singleRender:
+                currentImg = os.path.join(outImgPath, str(beginKeyIndex) + '_' + str(i) + '.png')
+                img = cv2.imread(currentImg, 1)
+                cv2.imwrite(outFrame, img)
+            else:
+                currentImg = os.path.join(outImgPath, str(beginKeyIndex) + '_' + str(i) + '.png')
+                nextImg = os.path.join(outImgPath, str(endKeyIndex)+ '_' + str(i) + '.png')
+                img_f = cv2.imread(currentImg, 1)
+                img_b = cv2.imread(nextImg, 1)
+                back_rate = (i - beginKeyIndex) / max(1, (
+                            endKeyIndex - beginKeyIndex))
+                img = cv2.addWeighted(img_f, 1.0 - back_rate, img_b, back_rate, 0)
+                cv2.imwrite(outFrame, img)
+
+            outFrames.append(outFrame)
 
     return outFrames
+
+
+
+
 
 
 # p 图生图或者文生图实例
@@ -347,7 +549,7 @@ def process_m2a(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mo
 
     return video
 
-def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode, invoke_tagger, invoke_tagger_val, common_invoke_tagger):
+def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode, invoke_tagger, invoke_tagger_val, common_invoke_tagger,min_gap,max_gap,max_delta):
     print('eb渲染')
 
     if invoke_tagger:
@@ -356,15 +558,17 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
     #工作目录生成
     # work-${time}
     #   key video out
-    [workDir,keyDir,videoDir,outDir] = mkWorkDir()
+    [workDir,keyDir,videoDir,outDir, outTmpDir] = mkWorkDir()
     print('workDir:', workDir)
 
     # 分拆视频帧到video
-    [videoImages, imgDataList, fps] = video2imgs(m_file, videoDir, max_frames)
+    [videoImages, imgDataList, fps] = video2imgs(m_file, videoDir, max_frames, True, p.width, p.height)
     # 挑选关键帧
-    [keyImages, keyIndexs] = selectKeyFrames(videoImages, fps_scale_parent)
+    [keyImages, keyIndexs] = selectVideoKeyFrame(videoImages,min_gap, max_gap,max_delta, True)
 
     print('keyIndexs', keyIndexs)
+
+    state.job_count = len(keyIndexs)
 
     # 将关键帧进行sd转换 生成的图片保存至key目录
     generate_keyFrames = []
@@ -409,7 +613,7 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
                 print('p.prompt 改为：', newTag)
             p.init_images = [image]
 
-        print(f'current progress: {i + 1}/{max_frames}')
+        print(f'current progress: {i + 1}/{len(keyIndexs)}')
         processed = process_images(p)
         # 只取第一张
         gen_image = processed.images[0]
@@ -426,7 +630,11 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
     # 出到out5的时候 因为out6是关键帧 所以使用key6作为out6
     # 然后用out6 video6 video7 出out7 依次类推
 
-    outFrames = transWithEb(keyIndexs, generate_keyFrames, videoImages, outDir)
+    # 上面效果不好，换成全部由关键帧来引导
+
+    transWithEb(keyIndexs, generate_keyFrames, videoImages, outTmpDir)
+
+    outFrames = ebFilesToOutFrames(videoImages, keyIndexs, outTmpDir, outDir)
 
     # 将out组装成视频
     r_f = '.mp4'
@@ -436,7 +644,10 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
     h = p.height
     print('width,height', w, h)
     print(f'Start generating {r_f} file')
+    if state.interrupted:
+        return
     video = imageFiles_to_video(outFrames, fps, mode, w, h,
                             os.path.join(m2a_output_dir, str(int(time.time())) + r_f, ))
+
 
     return video
