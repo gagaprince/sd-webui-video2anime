@@ -192,6 +192,8 @@ class Script(scripts.Script):
         else:
             m_files = os.listdir(init_mov_dir)
             for file_name in m_files:
+                if state.interrupted:
+                    break
                 m_file = os.path.join(init_mov_dir, file_name)
                 video = process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode,
                                     invoke_tagger, invoke_tagger_val, common_invoke_tagger,min_gap,max_gap,max_delta)

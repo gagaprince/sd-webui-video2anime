@@ -195,7 +195,7 @@ def corpImg(originImg, w, h):
     corpImg = cv2.resize(corpImg, (w, h))
     return corpImg
 
-def video2imgs(videoPath, imgPath, max_frames, needCorp, w=720,h=1280, maskDir=''):
+def video2imgs(videoPath, imgPath, max_frames, needCorp, w=720,h=1280, maskDir='', isNotNormal=False):
     if not os.path.exists(imgPath):
         os.makedirs(imgPath, exist_ok=True)             # 目标文件夹不存在，则创建
     cap = cv2.VideoCapture(videoPath)    # 获取视频
@@ -206,6 +206,8 @@ def video2imgs(videoPath, imgPath, max_frames, needCorp, w=720,h=1280, maskDir='
     imgDataList = []
 
     while(judge):
+        if state.interrupted:
+            break
         flag, frame = cap.read()         # 读取每一张图片 flag表示是否读取成功，frame是图片
         if not flag:
             print("Process finished!")
@@ -218,7 +220,7 @@ def video2imgs(videoPath, imgPath, max_frames, needCorp, w=720,h=1280, maskDir='
 
             if needCorp:
                 frame = corpImg(frame,w,h)
-            if maskDir != '':
+            if isNotNormal:
                 mask = rembg_mov_cv2(frame, True)
                 maskPath = os.path.join(maskDir,imgname)
                 cv2.imwrite(maskPath, mask, [cv2.IMWRITE_PNG_COMPRESSION, 0])
@@ -448,7 +450,7 @@ def giveMeMaskImg(originImg, transImg, maskImg):
     return img
 
 # 将输出的eb帧合并成视频需要的帧
-def ebFilesToOutFrames(videoFrames, keyIndexs, outImgPath, outPath, maskDir):
+def ebFilesToOutFrames(videoFrames, keyIndexs, outImgPath, outPath, maskDir, isNotNormal):
     outFrames = []
     originBgFrames = []
     greenBgFrames = []
@@ -482,29 +484,30 @@ def ebFilesToOutFrames(videoFrames, keyIndexs, outImgPath, outPath, maskDir):
                             endKeyIndex - beginKeyIndex))
                 img = cv2.addWeighted(img_f, 1.0 - back_rate, img_b, back_rate, 0)
 
-            # 增加原背景输出
-            originBgFrame = os.path.join(cwd, outPath, 'origin_' + str(i) + '.png')
-            originImg = cv2.imread(videoFrames[i],1)
-            maskPath = os.path.join(cwd,maskDir,str(i)+'.png')
-            maskImg = cv2.imread(maskPath,cv2.IMREAD_GRAYSCALE)
-            originImg = giveMeMaskImg(originImg,img,maskImg)
+            if isNotNormal:
+                # 增加原背景输出
+                originBgFrame = os.path.join(cwd, outPath, 'origin_' + str(i) + '.png')
+                originImg = cv2.imread(videoFrames[i],1)
+                maskPath = os.path.join(cwd,maskDir,str(i)+'.png')
+                maskImg = cv2.imread(maskPath,cv2.IMREAD_GRAYSCALE)
+                originImg = giveMeMaskImg(originImg,img,maskImg)
 
-            # 增加绿色背景输出
-            h = img.shape[0]
-            w = img.shape[1]
-            img_green = np.zeros([h,w,3], np.uint8)
-            img_green[:,:,1] = np.zeros([h,w])+255
-            greenBgFrame = os.path.join(cwd, outPath, 'green_' + str(i) + '.png')
-            greenImg = giveMeMaskImg(img_green,img,maskImg)
-
+                # 增加绿色背景输出
+                h = img.shape[0]
+                w = img.shape[1]
+                img_green = np.zeros([h,w,3], np.uint8)
+                img_green[:,:,1] = np.zeros([h,w])+255
+                greenBgFrame = os.path.join(cwd, outPath, 'green_' + str(i) + '.png')
+                greenImg = giveMeMaskImg(img_green,img,maskImg)
+                cv2.imwrite(originBgFrame, originImg)
+                cv2.imwrite(greenBgFrame, greenImg)
+                originBgFrames.append(originBgFrame)
+                greenBgFrames.append(greenBgFrame)
 
             outFrame = os.path.join(cwd, outPath, str(i) + '.png')
             cv2.imwrite(outFrame, img)
-            cv2.imwrite(originBgFrame, originImg)
-            cv2.imwrite(greenBgFrame, greenImg)
             outFrames.append(outFrame)
-            originBgFrames.append(originBgFrame)
-            greenBgFrames.append(greenBgFrame)
+
 
     return outFrames, originBgFrames, greenBgFrames
 
@@ -625,8 +628,10 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
     workDir,keyDir,videoDir,outDir, outTmpDir, maskDir = mkWorkDir()
     print('workDir:', workDir)
 
+    isNotNormal = rembg_mode != 'normal'
+
     # 分拆视频帧到video
-    [videoImages, imgDataList, fps] = video2imgs(m_file, videoDir, max_frames, True, p.width, p.height, maskDir)
+    [videoImages, imgDataList, fps] = video2imgs(m_file, videoDir, max_frames, True, p.width, p.height, maskDir, isNotNormal)
     # 挑选关键帧
     [keyImages, keyIndexs] = selectVideoKeyFrame(videoImages,min_gap, max_gap,max_delta, True)
 
@@ -698,7 +703,7 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
 
     transWithEb(keyIndexs, generate_keyFrames, videoImages, outTmpDir)
 
-    outFrames, originBgFrames, greenBgFrames = ebFilesToOutFrames(videoImages, keyIndexs, outTmpDir, outDir, maskDir)
+    outFrames, originBgFrames, greenBgFrames = ebFilesToOutFrames(videoImages, keyIndexs, outTmpDir, outDir, maskDir,isNotNormal)
 
     # 将out组装成视频
     r_f = '.mp4'
