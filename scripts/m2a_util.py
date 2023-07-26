@@ -133,6 +133,8 @@ def imageFiles_to_video(imageFiles, fps, mode, w, h, out_path):
     print('mode:', mode)
     print('w,h:',w,h)
     print('out_path:',out_path)
+    if len(imageFiles) == 0:
+        return
     fourcc = cv2.VideoWriter_fourcc(*mode)
     size = (w, h)
     vid = cv2.VideoWriter(os.path.join(os.getcwd(),out_path), fourcc, fps, size)
