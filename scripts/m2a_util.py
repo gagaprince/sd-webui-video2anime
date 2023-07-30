@@ -41,7 +41,7 @@ def getTagsFromImage(image, isImage, invoke_tagger_val, common_invoke_tagger):
 
     for k in tags:
         tagV = tags[k]
-        if tagV > invoke_tagger_val:
+        if tagV > invoke_tagger_val and k != 'realistic':
             tagsSelect.append(k)
 
     # ret = '((masterpiece)),best quality,ultra-detailed,smooth,best illustrationbest, shadow,photorealistic,hyperrealistic,backlighting,' + ','.join(tagsSelect)
@@ -181,7 +181,7 @@ def corpImg(originImg, w, h):
         endX = int(beginX + needw)
         beginY = 0
         endY = oldh
-        corpImg = originImg[beginX:endX, beginY:endY]
+        corpImg = originImg[beginY:endY, beginX:endX]
 
     elif int(oldw * h / oldh) < w:
         print('需要截取h')
@@ -190,7 +190,8 @@ def corpImg(originImg, w, h):
         endY = int(beginY + needY)
         beginX = 0
         endX = oldw
-        corpImg = originImg[beginX:endX, beginY:endY]
+        print('beginx:endx, beginY:endY', beginX,endX,beginY,endY)
+        corpImg = originImg[beginY:endY, beginX:endX]
     else:
         corpImg = originImg
 
