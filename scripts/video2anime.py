@@ -89,7 +89,7 @@ class Script(scripts.Script):
                                               placeholder="通用正向提示词，例如：((masterpiece)),best quality,ultra-detailed,smooth,best illustrationbest, shadow,photorealistic,hyperrealistic,backlighting,")
             with FormRow():
                 rembg_mode = gr.Radio(label="去背景模式", elem_id="rembg_mode",
-                                       choices=["正常", "透明背景", "原视频背景"], type="index", value="0")
+                                       choices=["正常", "透明背景", "原视频背景"], type="value", value="正常")
             with FormRow():
                 fps_scale_child = gr.Number(label='跳帧分子--假设你想m帧内取n帧，此处填n', value=1, elem_id='m2a_fps_scale_child')
                 fps_scale_parent = gr.Number(label='跳帧分母--假设你想m帧内取n帧，此处填m', value=1, elem_id='m2a_fps_scale_parent')
@@ -136,9 +136,9 @@ class Script(scripts.Script):
             m2a_mode: str,
     ):
         print('多帧渲染')
-        if rembg_mode == 0:
+        if rembg_mode == '正常':
             rembg_mode = 'normal'
-        elif rembg_mode == 1:
+        elif rembg_mode == '透明背景':
             rembg_mode = 'rembg'
         else:
             rembg_mode = 'maskbg'
@@ -165,7 +165,7 @@ class Script(scripts.Script):
         p: StableDiffusionProcessing,
         init_mov: str,
         init_mov_dir: str,
-        rembg_mode: int,
+        rembg_mode: str,
         fps_scale_child: int,
         fps_scale_parent: int,
         invoke_tagger: bool,
@@ -178,9 +178,9 @@ class Script(scripts.Script):
         max_delta: int,
     ):
         videos = []
-        if rembg_mode == 0:
+        if rembg_mode == '正常':
             rembg_mode = 'normal'
-        elif rembg_mode == 1:
+        elif rembg_mode == '透明背景':
             rembg_mode = 'rembg'
         else:
             rembg_mode = 'maskbg'
@@ -208,7 +208,7 @@ class Script(scripts.Script):
         enabled: bool,
         init_mov: str,
         init_mov_dir: str,
-        rembg_mode: int,
+        rembg_mode: str,
         fps_scale_child: int,
         fps_scale_parent: int,
         invoke_tagger: bool,
