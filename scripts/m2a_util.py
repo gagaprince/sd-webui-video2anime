@@ -516,7 +516,10 @@ def ebFilesToOutFrames(videoFrames, keyIndexs, outImgPath, outPath, maskDir, isN
 
 
 
-
+def create_white_img(w, h):
+    image = np.zeros([h, w, 3], dtype=np.uint8)
+    image.fill(255)
+    return image
 
 
 # p 图生图或者文生图实例
@@ -570,6 +573,10 @@ def process_m2a(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mo
             elif rembg_mode == 'maskbg':
                 mask_img = rembg_mov(img, True)
                 p.image_mask = mask_img
+            elif rembg_mode == 'lineart':
+                # controlnet 垫图
+                p.control_net_input_image = [img,img,img,img]
+                img = create_white_img(p.width, p.height) # 全白图片
             # 修改prompt
             if invoke_tagger:
                 newTag = getTagsFromImage(img, True, invoke_tagger_val, common_invoke_tagger)
@@ -621,6 +628,7 @@ def process_m2a(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mo
 
 def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode, invoke_tagger, invoke_tagger_val, common_invoke_tagger,min_gap,max_gap,max_delta):
     print('eb渲染')
+    print('rembg_mode:', rembg_mode)
 
     if invoke_tagger:
         refresh_interrogators()
@@ -631,7 +639,7 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
     workDir,keyDir,videoDir,outDir, outTmpDir, maskDir = mkWorkDir()
     print('workDir:', workDir)
 
-    isNotNormal = rembg_mode != 'normal'
+    isNotNormal = rembg_mode != 'normal' and rembg_mode != 'lineart'
 
     # 分拆视频帧到video
     [videoImages, imgDataList, fps] = video2imgs(m_file, videoDir, max_frames, True, p.width, p.height, maskDir, isNotNormal)
@@ -669,6 +677,14 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
                 newTag = getTagsFromImage(img, True, invoke_tagger_val, common_invoke_tagger)
                 p.prompt = newTag
                 print('p.prompt 改为：', newTag)
+            if rembg_mode == 'lineart':
+                print('设置白色图片')
+                # controlnet 垫图
+                p.control_net_input_image = [img] * 4
+                img = create_white_img(p.width, p.height) # 全白图片
+                img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), 'RGB')
+                img = ImageOps.exif_transpose(img)
+
             p.init_images = [img] * p.batch_size
             # if rembg_mode == 'rembg' or rembg_mode == 'maskbg':
             #     p.mask_blur = 4

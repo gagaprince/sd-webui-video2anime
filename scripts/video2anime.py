@@ -89,7 +89,7 @@ class Script(scripts.Script):
                                               placeholder="通用正向提示词，例如：((masterpiece)),best quality,ultra-detailed,smooth,best illustrationbest, shadow,photorealistic,hyperrealistic,backlighting,")
             with FormRow():
                 rembg_mode = gr.Radio(label="去背景模式", elem_id="rembg_mode",
-                                       choices=["正常", "透明背景", "原视频背景"], type="value", value="正常")
+                                       choices=["正常", "透明背景", "原视频背景", "线稿"], type="value", value="正常")
             with FormRow():
                 fps_scale_child = gr.Number(label='跳帧分子--假设你想m帧内取n帧，此处填n', value=1, elem_id='m2a_fps_scale_child')
                 fps_scale_parent = gr.Number(label='跳帧分母--假设你想m帧内取n帧，此处填m', value=1, elem_id='m2a_fps_scale_parent')
@@ -140,8 +140,10 @@ class Script(scripts.Script):
             rembg_mode = 'normal'
         elif rembg_mode == '透明背景':
             rembg_mode = 'rembg'
-        else:
+        elif rembg_mode == '原视频背景':
             rembg_mode = 'maskbg'
+        else:
+            rembg_mode = 'lineart'
 
         videos = []
 
@@ -182,8 +184,10 @@ class Script(scripts.Script):
             rembg_mode = 'normal'
         elif rembg_mode == '透明背景':
             rembg_mode = 'rembg'
-        else:
+        elif rembg_mode == '原视频背景':
             rembg_mode = 'maskbg'
+        else:
+            rembg_mode = 'lineart'
 
         if not init_mov_dir:
             video = process_m2a_eb(p, init_mov, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode,
