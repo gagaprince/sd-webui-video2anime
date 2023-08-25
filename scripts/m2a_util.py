@@ -12,7 +12,7 @@ import modules.images
 import os
 import sys
 from modules.shared import opts, state
-from modules import shared, sd_samplers, processing, images
+from modules import shared, sd_samplers, processing, images, scripts_postprocessing
 from modules.processing import StableDiffusionProcessingImg2Img, StableDiffusionProcessingTxt2Img, process_images, Processed
 import rembg
 from scripts.m2a_config import m2a_outpath_samples, m2a_output_dir, m2a_eb_output_dir
@@ -23,6 +23,30 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 
 _kernel = None
+
+def upscale(image, info, upscaler, upscale_mode=1, upscale_by=2, upscale_to_width=1080, upscale_to_height=1920, upscale_crop=False):
+    if upscale_mode == 1:
+        upscale_by = max(upscale_to_width / image.width, upscale_to_height / image.height)
+        info["Postprocess upscale to"] = f"{upscale_to_width}x{upscale_to_height}"
+    else:
+        info["Postprocess upscale by"] = upscale_by
+    image = upscaler.scaler.upscale(image, upscale_by, upscaler.data_path)
+
+    if upscale_mode == 1 and upscale_crop:
+        cropped = Image.new("RGB", (upscale_to_width, upscale_to_height))
+        cropped.paste(image, box=(upscale_to_width // 2 - image.width // 2, upscale_to_height // 2 - image.height // 2))
+        image = cropped
+        info["Postprocess crop to"] = f"{image.width}x{image.height}"
+
+    return image
+
+def run_upscale(image, upscale_to_width=1080, upscale_to_height=1920, upscaler_name='R-ESRGAN 4x+'):
+    if upscaler_name == 'None':
+        upscaler_name = 'R-ESRGAN 4x+'
+    info = {}
+    upscaler = next(iter([x for x in shared.sd_upscalers if x.name == upscaler_name]), None)
+    return upscale(image, info, upscaler, 1, 1, upscale_to_width, upscale_to_height)
+
 
 def refresh_interrogators():
     utils.refresh_interrogators()
@@ -136,7 +160,7 @@ def imageFiles_to_video(imageFiles, fps, mode, w, h, out_path):
     if len(imageFiles) == 0:
         return
     fourcc = cv2.VideoWriter_fourcc(*mode)
-    size = (w, h)
+    size = (int(w), int(h))
     vid = cv2.VideoWriter(os.path.join(os.getcwd(),out_path), fourcc, fps, size)
     for imageFile in imageFiles:
         imageFile = os.path.join(os.getcwd(),imageFile)
@@ -168,7 +192,8 @@ def mkWorkDir():
     os.makedirs(maskDir, exist_ok=True)
     return workDir,keyDir,videoDir,outDir, outTmpDir,maskDir
 
-def corpImg(originImg, w, h):
+def corpImg(originImg, w, h, des_w, des_h):
+
     oldh = originImg.shape[0]
     oldw = originImg.shape[1]
     print(oldw, oldh)
@@ -195,10 +220,12 @@ def corpImg(originImg, w, h):
     else:
         corpImg = originImg
 
-    corpImg = cv2.resize(corpImg, (w, h))
+    print('w.h.des_w,des_h', w, h, des_w, des_h)
+
+    corpImg = cv2.resize(corpImg, (int(des_w), int(des_h)))
     return corpImg
 
-def video2imgs(videoPath, imgPath, max_frames, needCorp, w=720,h=1280, maskDir='', isNotNormal=False):
+def video2imgs(videoPath, imgPath, max_frames, needCorp, w=720,h=1280, des_w=720, des_h=1280, maskDir='', isNotNormal=False):
     if not os.path.exists(imgPath):
         os.makedirs(imgPath, exist_ok=True)             # 目标文件夹不存在，则创建
     cap = cv2.VideoCapture(videoPath)    # 获取视频
@@ -211,7 +238,9 @@ def video2imgs(videoPath, imgPath, max_frames, needCorp, w=720,h=1280, maskDir='
     while(judge):
         if state.interrupted:
             break
-        flag, frame = cap.read()         # 读取每一张图片 flag表示是否读取成功，frame是图片
+        flag, origin_img = cap.read()         # 读取每一张图片 flag表示是否读取成功，frame是图片
+        frame = origin_img
+
         if not flag:
             print("Process finished!")
             break
@@ -222,13 +251,13 @@ def video2imgs(videoPath, imgPath, max_frames, needCorp, w=720,h=1280, maskDir='
             print(onePath)
 
             if needCorp:
-                frame = corpImg(frame,w,h)
+                frame = corpImg(frame,w,h, des_w, des_h)
             if isNotNormal:
                 mask = rembg_mov_cv2(frame, True)
                 maskPath = os.path.join(maskDir,imgname)
                 cv2.imwrite(maskPath, mask, [cv2.IMWRITE_PNG_COMPRESSION, 0])
 
-            imgDataList.append(frame)
+            imgDataList.append(origin_img)
             cv2.imwrite(onePath, frame, [cv2.IMWRITE_PNG_COMPRESSION, 0])
             imgPaths.append(onePath)
             count += 1
@@ -532,7 +561,7 @@ def create_white_img(w, h):
 # invoke_tagger 开启反推提示词
 # invoke_tagger_val 反推提示词阈值
 # common_invoke_tagger 公共提示词
-def process_m2a(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode, invoke_tagger, invoke_tagger_val, common_invoke_tagger):
+def process_m2a(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode, invoke_tagger, invoke_tagger_val, common_invoke_tagger, des_enabled,des_width,des_height,upscaler_name):
     print('mfile:', m_file)
     images, movie_frames = get_movie_all_images(m_file, fps_scale_child, fps_scale_parent)
     if not images:
@@ -603,6 +632,10 @@ def process_m2a(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mo
         # 只取第一张
 
         gen_image = processed.images[0]
+        # 判断是否需要放缩
+        if des_enabled:
+            gen_image = run_upscale(gen_image, des_width, des_height, upscaler_name)
+
 
         print('这是第',i,'张图片:', gen_image)
 
@@ -626,7 +659,7 @@ def process_m2a(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mo
 
     return video
 
-def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode, invoke_tagger, invoke_tagger_val, common_invoke_tagger,min_gap,max_gap,max_delta):
+def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode, invoke_tagger, invoke_tagger_val, common_invoke_tagger,min_gap,max_gap,max_delta, des_enabled,des_width,des_height,upscaler_name):
     print('eb渲染')
     print('rembg_mode:', rembg_mode)
 
@@ -642,7 +675,13 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
     isNotNormal = rembg_mode != 'normal' and rembg_mode != 'lineart'
 
     # 分拆视频帧到video
-    [videoImages, imgDataList, fps] = video2imgs(m_file, videoDir, max_frames, True, p.width, p.height, maskDir, isNotNormal)
+    videoImages = []
+    imgDataList = []
+    fps = 30
+    if des_enabled:
+        [videoImages, imgDataList, fps] = video2imgs(m_file, videoDir, max_frames, True, p.width, p.height, des_width, des_height, maskDir,isNotNormal)
+    else:
+        [videoImages, imgDataList, fps] = video2imgs(m_file, videoDir, max_frames, True, p.width, p.height, p.width, p.height, maskDir, isNotNormal)
     # 挑选关键帧
     [keyImages, keyIndexs] = selectVideoKeyFrame(videoImages,min_gap, max_gap,max_delta, True)
 
@@ -705,6 +744,15 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
         processed = process_images(p)
         # 只取第一张
         gen_image = processed.images[0]
+
+        # 判断是否需要放缩
+        if des_enabled:
+            gen_image = run_upscale(gen_image, des_width, des_height, upscaler_name)
+            img = np.asarray(gen_image)
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            gen_image = corpImg(img, p.width, p.height, des_width, des_height)
+            gen_image = Image.fromarray(cv2.cvtColor(gen_image, cv2.COLOR_BGR2RGB), 'RGB')
+
         print('这是第',i,'张关键帧图片:', gen_image)
         keyFramePath = images.save_image(gen_image, keyDir, "", p.seed, p.prompt,
                           forced_filename=str(keyIndexs[i]))
@@ -730,6 +778,9 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
 
     w = p.width
     h = p.height
+    if des_enabled:
+        w = des_width
+        h = des_height
     print('width,height', w, h)
     print(f'Start generating {r_f} file')
     if state.interrupted:

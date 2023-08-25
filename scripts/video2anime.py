@@ -80,9 +80,20 @@ class Script(scripts.Script):
                 max_delta = gr.Number(label='选取关键帧阈值', value=35,
                                     elem_id='max_delta')
             with FormRow():
+                des_enabled = gr.Checkbox(label='启用放缩至指定宽高', value=False)
+
+            with FormRow():
+                des_width = gr.Number(label='目标宽度', value=1080,
+                                            elem_id='des_width')
+                des_height = gr.Number(label='目标高度', value=1920,
+                                    elem_id='des_height')
+                upscaler_name = gr.Dropdown(label='放大算法', elem_id="extras_upscaler_1",
+                                                choices=[x.name for x in shared.sd_upscalers],
+                                                value=shared.sd_upscalers[0].name)
+            with FormRow():
                 invoke_tagger = gr.Checkbox(label='是否启用反推提示词', value=False)
             with FormRow():
-                invoke_tagger_val = gr.Number(label='反推提示词阈值', value=0.3,
+                invoke_tagger_val = gr.Number(label='反推提示词阈值', value=0.35,
                                             elem_id='m2a_invoke_tag_val')
             with FormRow():
                 common_invoke_tagger = gr.Textbox(label="如果你使用反推提示词，请输入你想附加的正向tag", elem_id="m2a_common_invoke_tagger", show_label=True, lines=3,
@@ -119,6 +130,10 @@ class Script(scripts.Script):
             min_gap,
             max_gap,
             max_delta,
+            des_enabled,
+            des_width,
+            des_height,
+            upscaler_name,
         ]
 
     def multiRender(
@@ -134,6 +149,10 @@ class Script(scripts.Script):
             common_invoke_tagger: str,
             max_frames: int,
             m2a_mode: str,
+            des_enabled: bool,
+            des_width: int,
+            des_height: int,
+            upscaler_name: str,
     ):
         print('多帧渲染')
         if rembg_mode == '正常':
@@ -149,14 +168,14 @@ class Script(scripts.Script):
 
         if not init_mov_dir:
             video = process_m2a(p, init_mov, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode,
-                                invoke_tagger, invoke_tagger_val, common_invoke_tagger)
+                                invoke_tagger, invoke_tagger_val, common_invoke_tagger, des_enabled,des_width,des_height,upscaler_name)
             videos.append(video)
         else:
             m_files = os.listdir(init_mov_dir)
             for file_name in m_files:
                 m_file = os.path.join(init_mov_dir, file_name)
                 video = process_m2a(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode,
-                                    invoke_tagger, invoke_tagger_val, common_invoke_tagger)
+                                    invoke_tagger, invoke_tagger_val, common_invoke_tagger, des_enabled,des_width,des_height,upscaler_name)
                 videos.append(video)
 
         for video in videos:
@@ -178,6 +197,10 @@ class Script(scripts.Script):
         min_gap: int,
         max_gap: int,
         max_delta: int,
+        des_enabled:bool,
+        des_width: int,
+        des_height: int,
+        upscaler_name: str,
     ):
         videos = []
         if rembg_mode == '正常':
@@ -191,7 +214,7 @@ class Script(scripts.Script):
 
         if not init_mov_dir:
             video = process_m2a_eb(p, init_mov, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode,
-                                invoke_tagger, invoke_tagger_val, common_invoke_tagger,min_gap,max_gap,max_delta)
+                                invoke_tagger, invoke_tagger_val, common_invoke_tagger,min_gap,max_gap,max_delta, des_enabled,des_width,des_height,upscaler_name)
             videos.append(video)
         else:
             m_files = os.listdir(init_mov_dir)
@@ -200,7 +223,7 @@ class Script(scripts.Script):
                     break
                 m_file = os.path.join(init_mov_dir, file_name)
                 video = process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode,
-                                    invoke_tagger, invoke_tagger_val, common_invoke_tagger,min_gap,max_gap,max_delta)
+                                    invoke_tagger, invoke_tagger_val, common_invoke_tagger,min_gap,max_gap,max_delta, des_enabled,des_width,des_height,upscaler_name)
                 videos.append(video)
 
         for video in videos:
@@ -223,6 +246,10 @@ class Script(scripts.Script):
         min_gap: int,
         max_gap: int,
         max_delta: int,
+        des_enabled: bool,
+        des_width: int,
+        des_height: int,
+        upscaler_name: str,
     ):
 
         if enabled and not self.m2aScriptIsRuning:
@@ -253,6 +280,10 @@ class Script(scripts.Script):
                         common_invoke_tagger,
                         max_frames,
                         m2a_mode,
+                        des_enabled,
+                        des_width,
+                        des_height,
+                        upscaler_name,
                     )
                 else:
                     self.keyFrameRender(
@@ -270,6 +301,10 @@ class Script(scripts.Script):
                         min_gap,
                         max_gap,
                         max_delta,
+                        des_enabled,
+                        des_width,
+                        des_height,
+                        upscaler_name,
                     )
 
             finally:
