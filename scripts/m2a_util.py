@@ -49,7 +49,8 @@ def run_upscale(image, upscale_to_width=1080, upscale_to_height=1920, upscaler_n
 
 
 def refresh_interrogators():
-    utils.refresh_interrogators()
+    if utils.interrogators is not None:
+        utils.refresh_interrogators()
     print('utils.interrogators', utils.interrogators)
 
 def getTagsFromImage(image, isImage, invoke_tagger_val, common_invoke_tagger):
@@ -771,6 +772,9 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
     transWithEb(keyIndexs, generate_keyFrames, videoImages, outTmpDir)
 
     outFrames, originBgFrames, greenBgFrames = ebFilesToOutFrames(videoImages, keyIndexs, outTmpDir, outDir, maskDir,isNotNormal)
+
+    if not os.path.exists(m2a_output_dir):
+        os.makedirs(m2a_output_dir, exist_ok=True)
 
     # 将out组装成视频
     r_f = '.mp4'
