@@ -49,7 +49,7 @@ def run_upscale(image, upscale_to_width=1080, upscale_to_height=1920, upscaler_n
 
 
 def refresh_interrogators():
-    if utils.interrogators is not None:
+    if not bool(utils.interrogators):
         utils.refresh_interrogators()
     print('utils.interrogators', utils.interrogators)
 
@@ -739,7 +739,7 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
                 newTag = getTagsFromImage(img, True, invoke_tagger_val, common_invoke_tagger)
                 p.prompt = newTag
                 print('p.prompt 改为：', newTag)
-            p.init_images = [image]
+            p.init_images = [img]
 
         print(f'current progress: {i + 1}/{len(keyIndexs)}')
         processed = process_images(p)
