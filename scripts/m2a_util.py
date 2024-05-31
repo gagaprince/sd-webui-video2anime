@@ -660,6 +660,27 @@ def process_m2a(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mo
 
     return video
 
+def merge_video(oldVideo, aiVideo, outVideo):
+    try:
+        # 尝试执行的代码
+        command = [
+            'ffmpeg',
+            '-i', oldVideo,
+            '-i', aiVideo,
+            '-c:v', 'copy',
+            '-c:a', 'aac',
+            '-strict', 'experimental',
+            '-map', '0:a',
+            '-map', '1:v',
+            outVideo
+        ]
+        # 调用subprocess运行ffmpeg命令
+        subprocess.run(command)
+    except Exception as e:
+        # 发生异常时执行的代码
+        print(e)
+
+
 def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a_mode, rembg_mode, invoke_tagger, invoke_tagger_val, common_invoke_tagger,min_gap,max_gap,max_delta, des_enabled,des_width,des_height,upscaler_name):
     print('eb渲染')
     print('rembg_mode:', rembg_mode)
@@ -789,13 +810,21 @@ def process_m2a_eb(p, m_file, fps_scale_child, fps_scale_parent, max_frames, m2a
     print(f'Start generating {r_f} file')
     if state.interrupted:
         return
-    video = imageFiles_to_video(outFrames, fps, mode, w, h,
-                            os.path.join(m2a_output_dir, str(int(time.time())) + r_f, ))
 
-    imageFiles_to_video(originBgFrames, fps, mode, w, h,
-                        os.path.join(m2a_output_dir, 'origin_'+str(int(time.time())) + r_f, ))
-    imageFiles_to_video(greenBgFrames, fps, mode, w, h,
-                        os.path.join(m2a_output_dir, 'green_'+str(int(time.time())) + r_f, ))
+    out_tmp_dir = os.path.join(m2a_output_dir, str(int(time.time())) + r_f, )
+    video = imageFiles_to_video(outFrames, fps, mode, w, h, out_tmp_dir)
+    merge_tmp_dir = os.path.join(m2a_output_dir, 'merge_'+str(int(time.time())) + r_f, )
+    merge_video(m_file, out_tmp_dir, merge_tmp_dir)
+
+    out_tmp_dir = os.path.join(m2a_output_dir, 'origin_'+str(int(time.time())) + r_f, )
+    imageFiles_to_video(originBgFrames, fps, mode, w, h, out_tmp_dir)
+    merge_tmp_dir = os.path.join(m2a_output_dir, 'merge_origin_' + str(int(time.time())) + r_f, )
+    merge_video(m_file, out_tmp_dir, merge_tmp_dir)
+
+    out_tmp_dir = os.path.join(m2a_output_dir, 'green_'+str(int(time.time())) + r_f, )
+    imageFiles_to_video(greenBgFrames, fps, mode, w, h, out_tmp_dir)
+    # merge_tmp_dir = os.path.join(m2a_output_dir, 'merge_green_' + str(int(time.time())) + r_f, )
+    # merge_video(m_file, out_tmp_dir, merge_tmp_dir)
 
 
     return video
